@@ -1390,55 +1390,61 @@ void SM_HandleInterrupt(submcu_t& sm)
 
 void SM_UpdateTimer(submcu_t& sm)
 {
+    if ((sm.device_mode[SM_DEV_TIMER_CTRL] & 0x20) || sm.sleep) {
+        sm.timer_cycles = sm.cycles; // Fast-forward when in sleep mode or timer is disabled
+        return;
+    }
+    
     while (sm.timer_cycles < sm.cycles)
     {
-        if ((sm.device_mode[SM_DEV_TIMER_CTRL] & 0x20) == 0 && !sm.sleep)
+        if (sm.timer_prescaler == 0)
         {
-            if (sm.timer_prescaler == 0)
-            {
-                sm.timer_prescaler = sm.device_mode[SM_DEV_PRESCALER];
+            sm.timer_prescaler = sm.device_mode[SM_DEV_PRESCALER];
 
-                if (sm.timer_counter == 0)
-                {
-                    sm.timer_counter = sm.device_mode[SM_DEV_TIMER];
-                    sm.device_mode[SM_DEV_INT_REQUEST] |= 0x8;
-                }
-                else
-                    sm.timer_counter--;
+            if (sm.timer_counter == 0)
+            {
+                sm.timer_counter = sm.device_mode[SM_DEV_TIMER];
+                sm.device_mode[SM_DEV_INT_REQUEST] |= 0x8;
             }
             else
-                sm.timer_prescaler--;
+            {
+                sm.timer_counter--;
+            }
         }
+        else
+        {
+            sm.timer_prescaler--;
+        }
+
         sm.timer_cycles += 16;
     }
+
 }
 
 void SM_UpdateUART(submcu_t& sm)
 {
     mcu_t& mcu = *sm.mcu;
 
-    if ((sm.device_mode[SM_DEV_UART1_CTRL] & 4) == 0) // RX disabled
+    if ((sm.device_mode[SM_DEV_UART1_CTRL] & 0x4) == 0 ||  // RX disabled
+        mcu.uart_write_ptr == mcu.uart_read_ptr ||         // No byte available
+        sm.uart_rx_gotbyte ||                              // Byte already processed
+        sm.cycles < mcu.uart_rx_delay) {                   // Waiting for delay
         return;
-    if (mcu.uart_write_ptr == mcu.uart_read_ptr) // no byte
-        return;
-
-    if (sm.uart_rx_gotbyte)
-        return;
-
-    if (sm.cycles < mcu.uart_rx_delay)
-        return;
+    }
 
     mcu.uart_rx_byte = mcu.uart_buffer[mcu.uart_read_ptr];
     mcu.uart_read_ptr = (mcu.uart_read_ptr + 1) % uart_buffer_size;
     sm.uart_rx_gotbyte = 1;
     sm.device_mode[SM_DEV_INT_REQUEST] |= 0x40;
 
-    mcu.uart_rx_delay = sm.cycles + 3000 * 4;
+    mcu.uart_rx_delay = sm.cycles + 12000; // avoid runtime calculation of 3000 * 4
 }
 
 void SM_Update(submcu_t& sm, uint64_t cycles)
 {
-    while (sm.cycles < cycles * 5)
+    uint64_t targetCycles = cycles * 5;
+
+    while (sm.cycles < targetCycles)
     {
         SM_HandleInterrupt(sm);
 
@@ -1449,7 +1455,7 @@ void SM_Update(submcu_t& sm, uint64_t cycles)
             SM_Opcode_Table[opcode](sm, opcode);
         }
 
-        sm.cycles += 12 * 4; // FIXME
+        sm.cycles += 48; // avoid runtime calculation of 12 * 4 // FIXME
         
         SM_UpdateTimer(sm);
         SM_UpdateUART(sm);
