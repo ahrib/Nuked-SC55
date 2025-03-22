@@ -165,3 +165,17 @@ target_enable_conversion_warnings(nuked-sc55-render)
 #==============================================================================
 install(TARGETS nuked-sc55-render)
 install(DIRECTORY doc/ DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+#=======
+# macOS debug symbols
+#=======
+if(APPLE)
+    find_program(DSYMUTIL_PROGRAM dsymutil)
+    if (DSYMUTIL_PROGRAM)
+    foreach(lang C CXX)
+        foreach(var LINK_EXECUTABLE CREATE_SHARED_LIBRARY)
+        set(CMAKE_${lang}_${var} "${CMAKE_${lang}_${var}}" "${DSYMUTIL_PROGRAM} <TARGET>")
+        endforeach()
+    endforeach()
+    endif()
+endif()
